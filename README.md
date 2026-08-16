@@ -56,7 +56,7 @@ git clone https://github.com/jpkelly/VSDream.git /tmp/vsdream
 bash /tmp/vsdream/install.sh
 ```
 
-This copies `SKILL.md` and `should-dream.sh` to `~/.vscode/skills/dream/` and creates a default `.dream-config`.
+This copies `SKILL.md` and `should-dream.sh` to `~/.copilot/skills/dream/` and creates a default `.dream-config`.
 
 ### 2. Run your first dream
 
@@ -95,9 +95,9 @@ See [Usage](#usage) below for the full flag reference.
 <details>
 <summary>Manual install</summary>
 
-1. Copy `SKILL.md` and `should-dream.sh` to `~/.vscode/skills/dream/`
-2. Run `chmod +x ~/.vscode/skills/dream/should-dream.sh`
-3. Copy `.dream-config.template` to `~/.vscode/skills/dream/.dream-config`
+1. Copy `SKILL.md` and `should-dream.sh` to `~/.copilot/skills/dream/`
+2. Run `chmod +x ~/.copilot/skills/dream/should-dream.sh`
+3. Copy `.dream-config.template` to `~/.copilot/skills/dream/.dream-config`
 4. Start a VS Code chat session and say: "Run the dream skill."
 
 </details>
@@ -181,7 +181,7 @@ Create a `.vscode/tasks.json` entry:
 {
   "label": "VSDream: Check & Consolidate",
   "type": "shell",
-  "command": "bash $HOME/.vscode/skills/dream/should-dream.sh && echo 'Dream conditions met — run the dream skill in chat' || echo 'Not yet time to dream'",
+  "command": "bash $HOME/.copilot/skills/dream/should-dream.sh && echo 'Dream conditions met — run the dream skill in chat' || echo 'Not yet time to dream'",
   "group": "none",
   "isBackground": false
 }
@@ -194,20 +194,20 @@ Run it periodically or bind it to a keyboard shortcut.
 ```bash
 # Check every 6 hours; should-dream.sh enforces the 24h minimum
 crontab -e
-# Add: 0 */6 * * * bash ~/.vscode/skills/dream/should-dream.sh && touch ~/.vscode/.dream-pending
+# Add: 0 */6 * * * bash ~/.copilot/skills/dream/should-dream.sh && touch ~/.copilot/.dream-pending
 ```
 
 Then add to your global instructions (`.instructions.md`):
 
 ```markdown
 ## Auto Dream
-If the file `~/.vscode/.dream-pending` exists at session start, run the dream skill, then delete the flag file.
+If the file `~/.copilot/.dream-pending` exists at session start, run the dream skill, then delete the flag file.
 ```
 
 **Option C — Shell alias:**
 
 ```bash
-alias dream='bash ~/.vscode/skills/dream/should-dream.sh --force && echo "Flagged for dream — start a chat and say: run the dream skill"'
+alias dream='bash ~/.copilot/skills/dream/should-dream.sh --force && echo "Flagged for dream — start a chat and say: run the dream skill"'
 ```
 
 ## What's Included
@@ -237,7 +237,7 @@ alias dream='bash ~/.vscode/skills/dream/should-dream.sh --force && echo "Flagge
 
 ## Configuration
 
-Edit `~/.vscode/skills/dream/.dream-config`:
+Edit `~/.copilot/skills/dream/.dream-config`:
 
 ```ini
 DREAM_MEMORY_SCOPE=user      # user, repo, or session

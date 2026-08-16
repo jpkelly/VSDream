@@ -119,7 +119,7 @@ First, parse the flags from the user's invocation message. Look for:
 Then read the config file for defaults:
 
 ```bash
-cat ~/.vscode/skills/dream/.dream-config 2>/dev/null || echo "DREAM_MEMORY_SCOPE=user"
+cat ~/.copilot/skills/dream/.dream-config 2>/dev/null || echo "DREAM_MEMORY_SCOPE=user"
 ```
 
 **Determine the target scope and path:**
@@ -547,7 +547,7 @@ After completing all 4 phases, write the timestamp so the auto-trigger knows whe
 **For `--scope user`:**
 
 ```bash
-date +%s > ~/.vscode/skills/dream/.last-dream
+date +%s > ~/.copilot/skills/dream/.last-dream
 ```
 
 **For `--scope repo` (single workspace):**
@@ -567,8 +567,8 @@ Session memory is ephemeral — no timestamp needed.
 Also write a global dream log entry (always, for all scopes):
 
 ```bash
-mkdir -p ~/.vscode/skills/dream/logs
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) | scope: <scope> | workspace: <repo-or-all> | sessions_scanned: <N> | entries_added: <N> | entries_updated: <N> | entries_archived: <N> | contradictions_resolved: <N>" >> ~/.vscode/skills/dream/logs/dream.log
+mkdir -p ~/.copilot/skills/dream/logs
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) | scope: <scope> | workspace: <repo-or-all> | sessions_scanned: <N> | entries_added: <N> | entries_updated: <N> | entries_archived: <N> | contradictions_resolved: <N>" >> ~/.copilot/skills/dream/logs/dream.log
 ```
 
 ---
@@ -683,7 +683,7 @@ You can also schedule it via a cron job or VS Code task (see README.md for detai
 
 ## Configuration
 
-Config file: `~/.vscode/skills/dream/.dream-config`
+Config file: `~/.copilot/skills/dream/.dream-config`
 
 ```ini
 # Memory scope to consolidate: user, repo, or session

@@ -9,13 +9,14 @@
 #   bash install.sh              # Install or update (overwrites skill files, preserves .dream-config)
 #   bash install.sh --auto       # Install/update + set up auto-trigger guidance
 #   bash install.sh --uninstall   # Remove skill (preserves /memories/)
-#   bash install.sh --force      # Update + overwrite .dream-config with defaults (resets config)
-
+#   bash install.sh --force      # Update + overwrite .dream-config with defaults (resets config)#
+# Skills are installed to ~/.copilot/skills/dream/ — the path VS Code and
+# VS Code Insiders both load custom Copilot skills from.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SKILL_DIR="$HOME/.vscode/skills/dream"
-CONFIG_DIR="$HOME/.vscode/skills/dream"
+SKILL_DIR="$HOME/.copilot/skills/dream"
+CONFIG_DIR="$HOME/.copilot/skills/dream"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -94,22 +95,10 @@ fi
 ok "Skill files installed."
 echo ""
 
-# --- Verify VS Code has the tools we need ---
-info "=== step: Verifying VS Code environment ==="
-
-# Check if skills directory is recognized (VS Code loads from ~/.vscode/skills/)
-# Note: VS Code Insiders uses a different path — detect and warn
-if [[ -d "$HOME/Library/Application Support/Code - Insiders" ]]; then
-    INSIDERS_SKILL_DIR="$HOME/Library/Application Support/Code - Insiders/User/prompts/skills/dream"
-    mkdir -p "$INSIDERS_SKILL_DIR"
-    cp "$SCRIPT_DIR/SKILL.md" "$INSIDERS_SKILL_DIR/SKILL.md"
-    ok "Installed/updated VS Code Insiders skills path: $INSIDERS_SKILL_DIR"
-fi
-
-echo ""
+# --- Report install location ---
 info "=== step: Installation complete ==="
 echo ""
-ok "VSDream is installed!"
+ok "VSDream is installed to $SKILL_DIR"
 if [[ $INSTALLED_BEFORE -eq 1 ]]; then
     echo ""
     if [[ $FORCE -eq 1 ]]; then

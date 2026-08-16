@@ -13,11 +13,11 @@
 #   ./should-dream.sh --scope repo --all        # Check all known repos
 #   ./should-dream.sh --force                   # Always exit 0
 #
-# Reads config from ~/.vscode/skills/dream/.dream-config
+# Reads config from ~/.copilot/skills/dream/.dream-config
 
 set -euo pipefail
 
-SKILL_DIR="$HOME/.vscode/skills/dream"
+SKILL_DIR="$HOME/.copilot/skills/dream"
 CONFIG="$SKILL_DIR/.dream-config"
 
 # Defaults
@@ -106,7 +106,7 @@ case "$SCOPE" in
             echo "Checking all repos with memory..."
             local_ready=0
             local_any_ready=0
-            for repo_mem_dir in "$HOME/.vscode/skills/dream/repos"/*/; do
+            for repo_mem_dir in "$HOME/.copilot/skills/dream/repos"/*/; do
                 [[ -d "$repo_mem_dir" ]] || continue
                 repo_slug=$(basename "$repo_mem_dir")
                 if check_last_dream "${repo_mem_dir}.last-dream" "repo:$repo_slug"; then
