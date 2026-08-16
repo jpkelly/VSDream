@@ -270,12 +270,12 @@ AND s.repository NOT ILIKE '%VSDream%'
 AND s.repository NOT ILIKE '%jp-kelly%'
 ```
 
-Use targeted SQL — not full reads. Each query targets a specific signal type.
+Use targeted SQL — not full reads. Each query targets a specific signal type. **Run all 6 categories below** — keyword matching alone misses most preferences, which are expressed through behavioral patterns, not explicit "I prefer" statements.
 
-**User corrections** (highest priority):
+**1. User corrections** (highest priority — explicit corrections of agent behavior):
 
 ```sql
-SELECT s.created_at, s.repository, t.user_message
+SELECT s.created_at, s.repository, LEFT(t.user_message, 300) as msg
 FROM turns t
 JOIN sessions s ON t.session_id = s.id
 WHERE t.user_message ILIKE '%actually%'
@@ -285,17 +285,21 @@ WHERE t.user_message ILIKE '%actually%'
    OR t.user_message ILIKE '%not right%'
    OR t.user_message ILIKE '%stop doing%'
    OR t.user_message ILIKE '%don''t do%'
+   OR t.user_message ILIKE '%don''t try%'
+   OR t.user_message ILIKE '%stop trying%'
    OR t.user_message ILIKE '%I meant%'
    OR t.user_message ILIKE '%that''s not%'
-   OR t.user_message ILIKE '%correction%'
+   OR t.user_message ILIKE '%I did not ask%'
+   OR t.user_message ILIKE '%I want to run%'
+   OR t.user_message ILIKE '%willy-nilly%'
 ORDER BY s.created_at DESC
 LIMIT 50;
 ```
 
-**Preferences and configuration:**
+**2. Explicit preferences** (direct statements of preference):
 
 ```sql
-SELECT s.created_at, s.repository, t.user_message
+SELECT s.created_at, s.repository, LEFT(t.user_message, 300) as msg
 FROM turns t
 JOIN sessions s ON t.session_id = s.id
 WHERE t.user_message ILIKE '%I prefer%'
@@ -313,28 +317,54 @@ ORDER BY s.created_at DESC
 LIMIT 50;
 ```
 
-**Important decisions:**
+**3. Deliberation and interaction style** (how the user works with agents — critical for global preferences):
 
 ```sql
-SELECT s.created_at, s.repository, t.user_message
+SELECT s.created_at, s.repository, LEFT(t.user_message, 300) as msg
 FROM turns t
 JOIN sessions s ON t.session_id = s.id
-WHERE t.user_message ILIKE '%let''s go with%'
-   OR t.user_message ILIKE '%I decided%'
-   OR t.user_message ILIKE '%we''re using%'
-   OR t.user_message ILIKE '%the plan is%'
-   OR t.user_message ILIKE '%switch to%'
-   OR t.user_message ILIKE '%move to%'
-   OR t.user_message ILIKE '%chosen%'
-   OR t.user_message ILIKE '%we agreed%'
+WHERE t.user_message ILIKE '%discuss%'
+   OR t.user_message ILIKE '%your thoughts%'
+   OR t.user_message ILIKE '%give me your thoughts%'
+   OR t.user_message ILIKE '%give me a list%'
+   OR t.user_message ILIKE '%running list%'
+   OR t.user_message ILIKE '%spot check%'
+   OR t.user_message ILIKE '%back burner%'
+   OR t.user_message ILIKE '%pivot to%'
+   OR t.user_message ILIKE '%moving on%'
+   OR t.user_message ILIKE '%review the plan%'
+   OR t.user_message ILIKE '%plan docs%'
+   OR t.user_message ILIKE '%prepopulate%'
+   OR t.user_message ILIKE '%don''t touch%'
+   OR t.user_message ILIKE '%leave it%'
 ORDER BY s.created_at DESC
 LIMIT 50;
 ```
 
-**Recurring patterns (frustration signals):**
+**4. Process and code decisions** (durable conventions, versioning, architecture):
 
 ```sql
-SELECT s.created_at, s.repository, t.user_message
+SELECT s.created_at, s.repository, LEFT(t.user_message, 300) as msg
+FROM turns t
+JOIN sessions s ON t.session_id = s.id
+WHERE t.user_message ILIKE '%convention%'
+   OR t.user_message ILIKE '%naming%'
+   OR t.user_message ILIKE '%versioning%'
+   OR t.user_message ILIKE '%release candidate%'
+   OR t.user_message ILIKE '%soak test%'
+   OR t.user_message ILIKE '%full update%'
+   OR t.user_message ILIKE '%patching%'
+   OR t.user_message ILIKE '%recommended way%'
+   OR t.user_message ILIKE '%stability over%'
+   OR t.user_message ILIKE '%architecture%'
+ORDER BY s.created_at DESC
+LIMIT 50;
+```
+
+**5. Frustration / recurring patterns** (things the user keeps having to repeat — highest-value signal):
+
+```sql
+SELECT s.created_at, s.repository, LEFT(t.user_message, 300) as msg
 FROM turns t
 JOIN sessions s ON t.session_id = s.id
 WHERE t.user_message ILIKE '%again%'
@@ -344,9 +374,43 @@ WHERE t.user_message ILIKE '%again%'
    OR t.user_message ILIKE '%same as before%'
    OR t.user_message ILIKE '%we always%'
    OR t.user_message ILIKE '%the usual%'
+   OR t.user_message ILIKE '%still getting%'
+   OR t.user_message ILIKE '%stuck again%'
+   OR t.user_message ILIKE '%password prompt%'
 ORDER BY s.created_at DESC
 LIMIT 50;
 ```
+
+**6. Goals and directives** (what the user is trying to accomplish — useful for context):
+
+```sql
+SELECT s.created_at, s.repository, LEFT(t.user_message, 300) as msg
+FROM turns t
+JOIN sessions s ON t.session_id = s.id
+WHERE t.user_message ILIKE '%the goal is%'
+   OR t.user_message ILIKE '%I want to%'
+   OR t.user_message ILIKE '%I need to%'
+   OR t.user_message ILIKE '%we should%'
+   OR t.user_message ILIKE '%we will use%'
+   OR t.user_message ILIKE '%all future%'
+ORDER BY s.created_at DESC
+LIMIT 30;
+```
+
+### Drift detection
+
+After scanning turns, check whether existing memory has **drifted** — facts that contradict what you see in the session store or codebase now. Compare each existing memory entry against:
+
+- **Server/infrastructure changes** — e.g., if memory says "aws1" but recent sessions mention "aws2", flag the migration
+- **Tool/dependency changes** — e.g., "yarn" → "pnpm", "sdl-clock" → "sdl3-clock"
+- **Naming changes** — e.g., branch "develop" → "main", directory "v4/" → "app/"
+- **Workflow changes** — e.g., "buildroot only" → "buildroot + Trixie"
+
+For each drift found, note: the old memory entry, the new evidence, and whether to update or supplement.
+
+### Don't exhaustively read
+
+Don't read every turn. Look only for things you already suspect matter based on the pattern matches above. If a query returns 50 results, skim for repeated themes across repos — those are the durable, global preferences. A one-off comment in a single repo is likely project-specific (belongs in repo memory, not user memory).
 
 ### Step 3: Check session files for context
 
@@ -404,6 +468,19 @@ For each finding, note:
 - **Confidence** — Was it an explicit instruction (high) or implied preference (medium)?
 - **Contradictions** — Does this conflict with anything currently in memory?
 - **Evidence** — What backs this up? (session turn, git commit, checkpoint summary)
+
+### Distinguishing global vs. project-specific
+
+This is the most important judgment call in a `--scope user` dream:
+
+- **A pattern that repeats across multiple repos** → global user preference. Write to `/memories/`.
+- **A pattern that appears in one repo only** → project-specific. Belongs in `/memories/repo/<repo-slug>/`, not user memory.
+- **A one-off comment** → likely not durable. Skip it unless it's an explicit, emphatic instruction.
+
+Examples:
+- "I want to run the script myself" said in archive-portal-api AND "I want to do the test" said in indexhibit → **global preference** (agent should offer to let user run things, not auto-run)
+- "Use SDL3 libraries" said only in clock8002 → **repo-specific** (belongs in clock8002 repo memory)
+- "Don't use the sandbox" said in jp-kelly.com AND archive-portal-api → **global preference** (already in memory, reinforced)
 
 ### Report open questions — never invent facts
 
