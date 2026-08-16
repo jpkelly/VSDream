@@ -9,7 +9,7 @@
 #   bash install.sh              # Install or update (overwrites skill files, preserves .dream-config)
 #   bash install.sh --auto       # Install/update + set up auto-trigger guidance
 #   bash install.sh --uninstall   # Remove skill (preserves /memories/)
-#   bash install.sh --force       # Same as default now (kept for compatibility)
+#   bash install.sh --force      # Update + overwrite .dream-config with defaults (resets config)
 
 set -euo pipefail
 
@@ -54,10 +54,10 @@ fi
 INSTALLED_BEFORE=0
 if [[ -d "$SKILL_DIR" && -f "$SKILL_DIR/SKILL.md" ]]; then
     INSTALLED_BEFORE=1
-    if [[ $FORCE -eq 0 ]]; then
-        info "VSDream is already installed at $SKILL_DIR — updating files..."
+    if [[ $FORCE -eq 1 ]]; then
+        info "VSDream is already installed — force-updating (including .dream-config)..."
     else
-        info "VSDream is already installed — force-updating files..."
+        info "VSDream is already installed at $SKILL_DIR — updating files..."
     fi
     # Fall through to copy step (overwrites existing files)
 else
@@ -73,10 +73,13 @@ cp "$SCRIPT_DIR/SKILL.md"           "$SKILL_DIR/SKILL.md"
 cp "$SCRIPT_DIR/should-dream.sh"   "$SKILL_DIR/should-dream.sh"
 chmod +x "$SKILL_DIR/should-dream.sh"
 
-# Copy config template if it doesn't exist
-if [[ ! -f "$SKILL_DIR/.dream-config" ]]; then
+# Copy config template — only if missing, unless --force (then overwrite)
+if [[ $FORCE -eq 1 ]] || [[ ! -f "$SKILL_DIR/.dream-config" ]]; then
     if [[ -f "$SCRIPT_DIR/.dream-config.template" ]]; then
         cp "$SCRIPT_DIR/.dream-config.template" "$SKILL_DIR/.dream-config"
+        if [[ $FORCE -eq 1 && $INSTALLED_BEFORE -eq 1 ]]; then
+            info ".dream-config overwritten with template defaults (--force)"
+        fi
     else
         cat > "$SKILL_DIR/.dream-config" << 'EOF'
 DREAM_MEMORY_SCOPE=user
@@ -98,12 +101,9 @@ info "=== step: Verifying VS Code environment ==="
 # Note: VS Code Insiders uses a different path — detect and warn
 if [[ -d "$HOME/Library/Application Support/Code - Insiders" ]]; then
     INSIDERS_SKILL_DIR="$HOME/Library/Application Support/Code - Insiders/User/prompts/skills/dream"
-    if [[ ! -d "$INSIDERS_SKILL_DIR" ]]; then
-        info "VS Code Insiders detected. Also installing to Insiders prompts path..."
-        mkdir -p "$INSIDERS_SKILL_DIR"
-        cp "$SCRIPT_DIR/SKILL.md" "$INSIDERS_SKILL_DIR/SKILL.md"
-        ok "Installed to VS Code Insiders skills path: $INSIDERS_SKILL_DIR"
-    fi
+    mkdir -p "$INSIDERS_SKILL_DIR"
+    cp "$SCRIPT_DIR/SKILL.md" "$INSIDERS_SKILL_DIR/SKILL.md"
+    ok "Installed/updated VS Code Insiders skills path: $INSIDERS_SKILL_DIR"
 fi
 
 echo ""
@@ -112,7 +112,11 @@ echo ""
 ok "VSDream is installed!"
 if [[ $INSTALLED_BEFORE -eq 1 ]]; then
     echo ""
-    info "Updated existing install — skill files overwritten, .dream-config preserved."
+    if [[ $FORCE -eq 1 ]]; then
+        info "Updated existing install — skill files + .dream-config overwritten with defaults."
+    else
+        info "Updated existing install — skill files overwritten, .dream-config preserved."
+    fi
 fi
 echo ""
 info "To run manually, tell VS Code chat:"
