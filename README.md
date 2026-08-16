@@ -52,7 +52,7 @@ Memory accumulates noise across sessions: stale facts, contradictions, relative 
 ### 1. Install
 
 ```bash
-git clone https://github.com/jp/VSDream.git /tmp/vsdream
+git clone https://github.com/jpkelly/VSDream.git /tmp/vsdream
 bash /tmp/vsdream/install.sh
 ```
 
