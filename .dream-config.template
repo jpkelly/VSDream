@@ -13,6 +13,12 @@ DREAM_MEMORY_SCOPE=user
 # Runtime flag: --workspace /path/to/repo (can be repeated for multiple)
 DREAM_WORKSPACES=
 
+# Repositories to exclude from session scanning (comma-separated repo paths or names)
+# Prevents self-referential noise — e.g. exclude VSDream so its own dev sessions
+# don't pollute global user memory with project-specific details
+# Runtime flag: --exclude VSDream (can be repeated)
+DREAM_EXCLUDE=
+
 # If true, --scope repo dreams iterate all known repositories from the session store
 # Runtime flag: --all
 DREAM_ALL=false

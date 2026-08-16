@@ -24,6 +24,7 @@ CONFIG="$SKILL_DIR/.dream-config"
 FORCE=0
 SCOPE="user"
 WORKSPACES=()
+EXCLUDES=()
 ALL=0
 
 # Read config defaults first
@@ -38,6 +39,7 @@ while [[ $# -gt 0 ]]; do
         --force)     FORCE=1; shift ;;
         --scope)     SCOPE="$2"; shift 2 ;;
         --workspace) WORKSPACES+=("$2"); shift 2 ;;
+        --exclude)   EXCLUDES+=("$2"); shift 2 ;;
         --all)       ALL=1; shift ;;
         *)           shift ;;
     esac
@@ -80,6 +82,9 @@ check_last_dream() {
 }
 
 echo "Dream check — scope: $SCOPE"
+if [[ ${#EXCLUDES[@]} -gt 0 ]]; then
+    echo "  Excluding: ${EXCLUDES[*]}"
+fi
 
 case "$SCOPE" in
     user)

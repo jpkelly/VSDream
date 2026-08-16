@@ -47,6 +47,7 @@ The dream accepts flags that control **what memory to consolidate** and **which 
 | `--scope` | `user` (default), `repo`, `session` | Which memory scope to write to |
 | `--workspace` | `<repo-path>` or `<repo-name>` | Target a specific repository's memory (implies `--scope repo`). Can be repeated for multiple repos. |
 | `--all` | (no value) | Consolidate across ALL known repositories. With `--scope repo`, iterates every repo that has memory or recent sessions. |
+| `--exclude` | `<repo-path>` or `<repo-name>` | Exclude a repo's sessions from scanning. Can be repeated for multiple. Useful for avoiding self-referential noise (e.g. `--exclude VSDream`). |
 | `--window` | `1 day`, `7 days`, `30 days`, `90 days`, `all` | How far back to scan sessions (overrides config) |
 | `--dry-run` | (no value) | Preview changes without writing to memory |
 | `--force` | (no value) | Skip the time-since-last-dream check |
@@ -58,6 +59,16 @@ The dream accepts flags that control **what memory to consolidate** and **which 
 - **`--scope repo`** — Consolidates `/memories/repo/` for one or more repositories. By default targets the **current workspace**. Use `--workspace` to target a different repo, or `--all` to iterate every known repo. This is for project-specific conventions, build commands, and architecture facts.
 
 - **`--scope session`** — Consolidates `/memories/session/` for the current conversation only. Rarely useful — session memory is ephemeral.
+
+#### Excluding repositories (`--exclude`)
+
+The `--exclude` flag prevents sessions from specific repositories from being scanned. This avoids **self-referential noise**: if you run the dream from the VSDream workspace, the session store contains the very conversations where you built the skill. Without `--exclude`, those sessions might pollute global user memory with VSDream-specific details ("JP uses `session_store_sql`", "JP likes `--scope` flags") that aren't actually global preferences.
+
+- `--exclude VSDream` — skip all sessions from the VSDream repo
+- `--exclude VSDream --exclude jp-kelly` — skip multiple repos
+- Can be combined with any scope. With `--scope user`, excluded repos' sessions are filtered out of the global scan. With `--scope repo --all`, excluded repos are skipped entirely.
+
+**VSDream dreaming about itself:** There's a delightful meta case — if you *don't* exclude VSDream and run `--scope repo --workspace VSDream`, the dream will consolidate facts about its own development into `/memories/repo/vsdream/`. This is legitimate repo memory (the skill's design decisions, flag conventions, safety rules) and harmless. The dream learning about itself is a feature, not a bug. Just don't let those self-referential sessions leak into `--scope user` where they'd pollute your global preferences.
 
 #### Workspace targeting
 
@@ -99,6 +110,7 @@ First, parse the flags from the user's invocation message. Look for:
 
 - `--scope <user|repo|session>` — overrides `DREAM_MEMORY_SCOPE` config
 - `--workspace <path-or-name>` — target a specific repo (can appear multiple times). Implies `--scope repo`.
+- `--exclude <path-or-name>` — exclude a repo's sessions from scanning (can appear multiple times)
 - `--all` — consolidate across all known repositories
 - `--window <interval>` — overrides `DREAM_WINDOW` config
 - `--dry-run` — overrides `DREAM_DRY_RUN` config
@@ -118,10 +130,13 @@ cat ~/.vscode/skills/dream/.dream-config 2>/dev/null || echo "DREAM_MEMORY_SCOPE
 | `--scope repo` (no `--workspace`) | `repo` | `/memories/repo/` (current workspace) | Current workspace only |
 | `--scope repo --workspace /path/to/repo` | `repo` | `/memories/repo/<repo-slug>/` | That repo only |
 | `--scope repo --workspace A --workspace B` | `repo` | Two paths, dreamed sequentially | Each repo independently |
-| `--scope repo --all` | `repo` | All repos that have memory or recent sessions | Each repo independently |
+| `--scope repo --all` | `repo` | All repos that have memory or recent sessions | Each repo independently (minus `--exclude`d repos) |
+| `--scope user --exclude VSDream` | `user` | `/memories/` | All repos except VSDream |
 | `--scope session` | `session` | `/memories/session/` | Current session only |
 
 **Repo slug derivation:** Convert a repo path or name to a slug by taking the last path component and lowercasing. E.g. `/Users/jp/Documents/GitHub/jp-kelly` → `jp-kelly`. If two repos have the same name, use the full path as the slug instead.
+
+**If `--exclude` is set**, record the excluded repo names/slugs. These will be filtered out of every session query in Phase 2. Derive slugs the same way as `--workspace` (last path component, lowercased).
 
 **If `--all` is set**, discover all known repositories from the session store:
 
@@ -240,7 +255,20 @@ LIMIT 1;
 
 Then add `AND s.repository = '<repo-name>'` (or `AND s.repo_id = <id>`) to every signal query below.
 
-**If `--scope user` (default)**, scan across ALL repositories — no repo filter.
+**If `--scope user` (default)**, scan across ALL repositories — no repo filter, **unless `--exclude` is set**.
+
+**If `--exclude` is set** (any scope), add an exclusion filter to every query below:
+
+```sql
+-- Add to the WHERE clause of every signal query:
+AND s.repository NOT ILIKE '%<excluded-repo-name>%'
+```
+
+For multiple excludes, chain them:
+```sql
+AND s.repository NOT ILIKE '%VSDream%'
+AND s.repository NOT ILIKE '%jp-kelly%'
+```
 
 Use targeted SQL — not full reads. Each query targets a specific signal type.
 
@@ -665,6 +693,12 @@ DREAM_MEMORY_SCOPE=user
 # Default workspace(s) for --scope repo (comma-separated repo paths or names)
 # Leave empty to use the current workspace
 DREAM_WORKSPACES=
+
+# Repositories to exclude from session scanning (comma-separated repo paths or names)
+# Prevents self-referential noise — e.g. exclude VSDream so its own dev sessions
+# don't pollute global user memory with project-specific details
+# Runtime flag: --exclude VSDream (can be repeated)
+DREAM_EXCLUDE=
 
 # If true, --scope repo dreams iterate all known repositories
 DREAM_ALL=false

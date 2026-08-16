@@ -110,6 +110,7 @@ VSDream supports flags that control which memory to consolidate and which sessio
 | `--scope` | `user` (default), `repo`, `session` | Which memory scope to write to |
 | `--workspace` | `<repo-path>` or `<repo-name>` | Target a specific repo's memory (implies `--scope repo`). Can be repeated. |
 | `--all` | — | With `--scope repo`, iterate every known repository |
+| `--exclude` | `<repo-path>` or `<repo-name>` | Exclude a repo's sessions from scanning. Can be repeated. Avoids self-referential noise. |
 | `--window` | `1 day`, `7 days`, `30 days`, `90 days`, `all` | How far back to scan |
 | `--dry-run` | — | Preview changes without writing |
 | `--force` | — | Skip the time-since-last-dream check |
@@ -137,7 +138,15 @@ Examples:
 
 # Scan a wider window of session history
 > Run the dream skill with --scope user --window 90 days
+
+# Exclude self-referential sessions (run from VSDream workspace)
+> Run the dream skill with --scope user --exclude VSDream
+
+# Dream all repos except VSDream (skip the meta-noise)
+> Run the dream skill with --scope repo --all --exclude VSDream
 ```
+
+**Self-referential dreaming:** If you run `--scope repo --workspace VSDream` *without* `--exclude`, the dream will consolidate facts about its own development into `/memories/repo/vsdream/` — its design decisions, flag conventions, safety rules. This is legitimate repo memory and harmless. The dream learning about itself is a feature, not a bug. Just use `--exclude VSDream` when running `--scope user` so those dev sessions don't leak into your global preferences.
 
 **Per-repo tracking:** Each repository tracks its own `.last-dream` timestamp, so `--all` won't re-consolidate a repo that was just dreamed (unless `--force`).
 
@@ -214,6 +223,7 @@ Edit `~/.vscode/skills/dream/.dream-config`:
 ```ini
 DREAM_MEMORY_SCOPE=user      # user, repo, or session
 DREAM_WORKSPACES=            # comma-separated repo paths/names for --scope repo
+DREAM_EXCLUDE=               # comma-separated repos to exclude from scanning
 DREAM_ALL=false              # true = iterate all known repos for --scope repo
 DREAM_WINDOW=7 days          # 1 day, 7 days, 30 days, 90 days, all
 DREAM_INTERVAL_HOURS=24      # min hours between auto-dreams
@@ -221,7 +231,7 @@ DREAM_DRY_RUN=false          # true = preview only, no writes
 DREAM_MAX_LINES=200          # max lines per memory file
 ```
 
-Runtime flags (`--scope`, `--workspace`, `--all`, `--window`, `--dry-run`, `--force`) always override config file values.
+Runtime flags (`--scope`, `--workspace`, `--exclude`, `--all`, `--window`, `--dry-run`, `--force`) always override config file values.
 
 ## Requirements
 
