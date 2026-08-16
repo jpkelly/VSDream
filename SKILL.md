@@ -682,55 +682,62 @@ After running, verify the consolidation:
 2. Check that no topic file has duplicate entries
 3. Confirm no relative dates remain ("yesterday", "last week", etc.)
 4. Verify all entries have absolute (ISO 8601) dates
-5. Produce a structured change report
+5. Produce a concise change report
 
 ### Change report format
 
-Return a **unified-diff-style** summary of what you consolidated, followed by a concise change report. This makes the dream reviewable — you can see exactly what was added, updated, and removed.
+The report must be **concise, scannable, and clearly indicate what will change**. Use a simple table format — one row per change, no diffs, no context lines, no prose paragraphs. The user should be able to scan it in seconds and know exactly what would happen.
 
 ```text
-=== Dream Change Report ===
-Date: 2026-08-15T14:32:00Z
-Scope: user
-Window: 7 days
-Sessions scanned: 37
-Models: copilot (22), claude (15)
+═══ DREAM REPORT ═══
+Date:    2026-08-15 14:32 UTC
+Scope:   user
+Window:  7 days · 37 sessions · 20 models
 
---- /memories/preferences.md
-+++ /memories/preferences.md
-@@ -12,3 +12,4 @@
- - [2026-08-10] Prefers tabs for indentation
-+- [2026-08-14] Prefers 2-space indentation (Updated, previously: tabs) (source: session, repo: VSDream)
- - [2026-08-08] Always use semicolons in JavaScript
+─── CHANGES (15) ───
+ACTION   FILE                    ENTRY
+ADD      preferences.md          Prefers to run tests himself, not agent
+ADD      preferences.md          Prefers full updates, not patching
+ADD      preferences.md           Prefers stability over recovery (embedded)
+UPDATE   workflow-jp-kelly.md     Server: aws1 → aws2 (decommissioned)
+UPDATE   decisions.md             Branch: "develop" → "main"
+REMOVE   MEMORY.md                Stale ref to nonexistent.md
+CREATE   corrections.md           New file — 1 entry
 
---- /memories/decisions.md
-+++ /memories/decisions.md
-@@ -5,3 +5,1 @@
--- [2026-07-30] Default branch is "develop"
-+- [2026-08-13] Default branch is "main" (Updated, previously: develop) (source: session, repo: jp-kelly)
+─── DRIFT (3) ───
+FILE                    ISSUE                          EVIDENCE
+workflow-jp-kelly.md    Says "aws1" but aws1 is dead   Session 2026-08-13
+jp-indexhibit-prefs.md  "Current goal: build"         Installer working since 2026-08-13
+workflow-jp-kelly.md    Refs deploy-pipeline.md       File doesn't exist in /memories/repo/
 
---- /memories/corrections.md  (NEW FILE)
-+++ /memories/corrections.md
-@@ -0,0 +1,3 @@
-+# Corrections
-+- [2026-08-12] User's name is Jordan, not Alex (source: session, confidence: high)
+─── OPEN QUESTIONS (2) ───
+- Is AWS2 fully primary, or is AWS1 still needed for some services?
+- Do referenced repo memory files exist elsewhere or need creation?
 
-=== Summary ===
-Entries added:      2
-Entries updated:    2
-Entries archived:    0
-Contradictions:     2 resolved
-Stale entries:      0 removed
-Open questions:     1 (Is the deploy target still AWS us-east-1?)
-Duration:           45s
+─── SUMMARY ───
+Added 12 · Updated 2 · Removed 1 · Created 1 · Drift 3 · Questions 2
+Status: DRY RUN — no files modified
 ```
 
-If nothing changed (memories are already tight), say so explicitly:
+**Rules for the report:**
+- **One line per change** — no multi-line diffs, no context lines
+- **ACTION column** — `ADD`, `UPDATE`, `REMOVE`, `CREATE` (capitalized, fixed width)
+- **FILE column** — just the filename, no full path
+- **ENTRY column** — short description, not the full memory text (max ~60 chars)
+- **DRIFT section** — separate from changes; shows what's stale and the evidence
+- **OPEN QUESTIONS** — things that look important but unconfirmed
+- **SUMMARY** — one line: counts + status (dry run or applied)
+- If nothing changed:
 
 ```text
-=== Dream Change Report ===
-No changes needed. Memory is already consolidated and current.
+═══ DREAM REPORT ═══
+No changes needed. Memory is already current.
+Status: DRY RUN — no files modified
 ```
+
+**In `--dry-run` mode:** the report is printed but nothing is written. The status line must say `DRY RUN — no files modified`.
+
+**When applied (no `--dry-run`):** the report is printed AND changes are written. The status line says `APPLIED — N files modified`.
 
 ---
 
