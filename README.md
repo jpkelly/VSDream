@@ -2,6 +2,25 @@
 
 Your AI agent dreams like you do. Consolidates memory while you sleep — **model-agnostic**.
 
+## Table of Contents
+
+- [Why Model-Agnostic?](#why-model-agnostic)
+- [What It Does](#what-it-does)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+  - [Manual](#manual)
+  - [Targeting scopes and workspaces](#targeting-scopes-and-workspaces)
+  - [Automatic](#automatic)
+- [Auto Dream](#auto-dream)
+- [What's Included](#whats-included)
+- [How It Compares](#how-it-compares)
+- [Configuration](#configuration)
+- [Requirements](#requirements)
+- [Safety](#safety)
+- [License](#license)
+
+---
+
 Claude has its [Dreams feature](https://platform.claude.com/docs/en/managed-agents/dreams) for memory consolidation. VSDream brings the same idea to VS Code's native chat, but works with **any model** — Copilot, Claude, GPT, or whatever's next — because it builds on VS Code's own infrastructure, not any model's API.
 
 ## Why Model-Agnostic?
