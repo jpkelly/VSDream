@@ -31,11 +31,11 @@ DREAM_WINDOW=7 days
 # Minimum hours between automatic dreams
 DREAM_INTERVAL_HOURS=24
 
-# Dry run mode: preview changes without writing to memory
-#   true  — Phase 3 only prints what it would change
-#   false — Phase 3 writes to memory files [default]
-# Runtime flag: --dry-run
-DREAM_DRY_RUN=false
+# Whether a dream is allowed to write to memory.
+#   false — every dream is a preview only; nothing is written [default]
+#   true  — the dream writes its findings to memory
+# Runtime flag: --apply (forces true for a single run, regardless of this setting)
+DREAM_APPLY=false
 
-# Maximum lines per memory file before entries are archived
+# Maximum lines per memory file before splitting by sub-topic
 DREAM_MAX_LINES=200

@@ -50,9 +50,9 @@ Then open VS Code chat (any model) and say:
 
 > Run the dream skill. Read SKILL.md and execute all 4 phases.
 
-The dream reads your `/memories/` files, queries the session store for recent signal, merges findings, and prints a change report.
+The dream reads your `/memories/` files, gathers recent signal, and prints a change report. **Every dream is a preview by default — nothing is written until you say so.**
 
-**Preview first** (optional): `> Run the dream skill with --dry-run`
+**Review the report, then apply it**: `> Run the dream skill with --apply`
 
 **Target a repo** (optional): `> Run the dream skill with --scope repo --workspace jp-kelly`
 
@@ -69,7 +69,7 @@ Re-running `install.sh` updates in place — skill files overwritten, `.dream-co
 | `--all` | — | With `--scope repo`, iterate every known repository |
 | `--exclude` | `<repo-path>` or `<repo-name>` | Exclude a repo's sessions from scanning. Repeatable. Avoids self-referential noise. |
 | `--window` | `1 day`, `7 days`, `30 days`, `90 days`, `all` | How far back to scan |
-| `--dry-run` | — | Preview changes without writing |
+| `--apply` | — | Write the changes to memory. **Without this flag every dream is a preview** — dry run is the default, not an option. |
 | `--force` | — | Skip the time-since-last-dream check |
 
 ### Examples
@@ -93,8 +93,11 @@ Re-running `install.sh` updates in place — skill files overwritten, `.dream-co
 # All repos except VSDream
 > Run the dream skill with --scope repo --all --exclude VSDream
 
-# Preview without writing; wider window
-> Run the dream skill with --dry-run --scope user --window 90 days
+# Preview (default) with a wider window
+> Run the dream skill with --scope user --window 90 days
+
+# Apply the changes after reviewing the preview
+> Run the dream skill with --scope user --apply
 ```
 
 **Self-referential dreaming:** Running `--scope repo --workspace VSDream` *without* `--exclude` lets the dream consolidate facts about its own development into `/memories/repo/vsdream/`. This is legitimate repo memory — the dream learning about itself is a feature. Use `--exclude VSDream` with `--scope user` so dev sessions don't leak into global preferences.
@@ -156,7 +159,7 @@ DREAM_EXCLUDE=               # comma-separated repos to exclude from scanning
 DREAM_ALL=false              # true = iterate all known repos (--scope repo)
 DREAM_WINDOW=7 days          # 1 day, 7 days, 30 days, 90 days, all
 DREAM_INTERVAL_HOURS=24      # min hours between auto-dreams
-DREAM_DRY_RUN=false          # true = preview only, no writes
+DREAM_APPLY=false            # true = allow writes; false = always preview
 DREAM_MAX_LINES=200          # max lines per memory file
 ```
 
@@ -168,7 +171,7 @@ Runtime flags always override config values.
 - **No edits outside memory** — only `/memories/` files are touched
 - **No invented facts** — unconfirmed signals become open questions, not memory entries
 - **No deletion without replacement** — contradicted entries are replaced, not erased
-- **Dry run** — `--dry-run` previews all changes before writing
+- **Preview by default** — a dream only writes when `--apply` is explicitly passed
 
 ## What's Included
 

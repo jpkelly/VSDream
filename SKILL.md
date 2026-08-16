@@ -49,7 +49,7 @@ The dream accepts flags that control **what memory to consolidate** and **which 
 | `--all` | (no value) | Consolidate across ALL known repositories. With `--scope repo`, iterates every repo that has memory or recent sessions. |
 | `--exclude` | `<repo-path>` or `<repo-name>` | Exclude a repo's sessions from scanning. Can be repeated for multiple. Useful for avoiding self-referential noise (e.g. `--exclude VSDream`). |
 | `--window` | `1 day`, `7 days`, `30 days`, `90 days`, `all` | How far back to scan sessions (overrides config) |
-| `--dry-run` | (no value) | Preview changes without writing to memory |
+| `--apply` | (no value) | Write the changes to memory. **Without this flag, every dream is a preview only** — this mirrors the original dream prompt's caution: a dream reports what it found and proposes changes, it does not silently rewrite your memory. |
 | `--force` | (no value) | Skip the time-since-last-dream check |
 
 #### Scope details
@@ -113,7 +113,7 @@ First, parse the flags from the user's invocation message. Look for:
 - `--exclude <path-or-name>` — exclude a repo's sessions from scanning (can appear multiple times)
 - `--all` — consolidate across all known repositories
 - `--window <interval>` — overrides `DREAM_WINDOW` config
-- `--dry-run` — overrides `DREAM_DRY_RUN` config
+- `--apply` — overrides `DREAM_APPLY` config; without it, the dream never writes
 - `--force` — skip the last-dream time check
 
 Then read the config file for defaults:
@@ -203,12 +203,26 @@ Note for whichever scope you're reading:
 - Any contradictions between files
 - Any references to files/projects that may no longer exist
 
+### Step 2: Reconcile against project instructions
+
+Before gathering new signal, check what's **already** captured in instructions files — these are read automatically every session, so duplicating them into memory is wasted context. Look for, if present:
+
+- `.github/copilot-instructions.md`
+- `AGENTS.md` / `CLAUDE.md`
+- `*.instructions.md` under the user prompts folder or `.github/instructions/`
+
+For each, note the facts and preferences it already states. Two rules follow from this:
+
+- **Don't duplicate.** If a fact already lives in an instructions file, don't write it to memory — it's already loaded every session.
+- **Flag, don't silently fix, contradictions.** If memory disagrees with an instructions file, that's drift — report it in Phase 4's output. Never overwrite an instructions file; only memory is in scope for a dream.
+
 ### Output of this phase
 
 You should now have a mental map of:
 - What topics are covered in memory
 - How large the memory files are
 - What's potentially stale or contradictory
+- What's already covered by instructions files (so Phase 2 doesn't re-capture it)
 - What scope you're consolidating (`user`, `repo`, or `session`)
 - If `--all`: the full list of repos to iterate
 
@@ -216,7 +230,15 @@ You should now have a mental map of:
 
 ## Phase 2: GATHER SIGNAL
 
-**Goal:** Extract important information from recent sessions without reading everything. This is the model-agnostic phase — it queries the cloud session store that captures ALL past sessions regardless of which model ran them.
+**Goal:** Extract important information recently learned — like a reflective pass over what happened, not an exhaustive audit. This is the model-agnostic phase: it reads the cloud session store that captures ALL past sessions regardless of which model ran them.
+
+Sources in priority order — **read narrative first, grep second**:
+
+1. **Session digest** (primary) — a chronological read of recent sessions: what each was about, what was done, what came next. This is the model-agnostic equivalent of reading a session log.
+2. **Existing memory that drifted** — facts that contradict what the digest or codebase shows now.
+3. **Targeted grep** (secondary, confirmatory only) — if the digest surfaces a theme you want to confirm or quote precisely (e.g. "was that phrased as a hard rule?"), run one narrow keyword query. Don't run a battery of queries by default.
+
+**Don't exhaustively read.** Look only for things you already suspect matter from the digest. A query that returns 50 rows is a sign to skim for a repeated theme, not to catalog every row.
 
 ### Source: Cloud Session Store
 
@@ -225,284 +247,113 @@ VS Code's session store is a DuckDB database with tables: `sessions`, `turns`, `
 ### Step 1: Get the lay of the land
 
 ```sql
--- How many recent sessions exist?
-SELECT COUNT(*) as total_sessions,
-       MIN(created_at) as earliest,
-       MAX(created_at) as latest
+SELECT COUNT(*) as total_sessions, MIN(created_at) as earliest, MAX(created_at) as latest
 FROM sessions;
 ```
 
 ```sql
--- What agents/models have been used?
 SELECT agent_name, COUNT(*) as session_count
-FROM sessions
-GROUP BY agent_name
-ORDER BY session_count DESC;
+FROM sessions GROUP BY agent_name ORDER BY session_count DESC;
 ```
 
-### Step 2: Scan recent turns for signal patterns
+**Scope filtering** applies to every query below:
+- `--scope repo` / `--workspace` → add `AND s.repository = '<repo-name>'`
+- `--scope user` (default) → no repo filter
+- `--exclude <repo>` (any scope) → add `AND s.repository NOT ILIKE '%<repo>%'` (chain for multiple)
+- `--window <interval>` → add `AND s.created_at > now() - INTERVAL '<interval>'` (default `7 days`)
 
-**If `--scope repo` or `--workspace` is set**, filter all queries to the target repository:
+### Step 2: Read the session digest (primary source)
 
-```sql
--- Find the repo_id or repository name for the target workspace
-SELECT DISTINCT repository, cwd, repo_id
-FROM sessions
-WHERE repository = '<repo-name>'
-   OR cwd = '<repo-path>'
-LIMIT 1;
-```
-
-Then add `AND s.repository = '<repo-name>'` (or `AND s.repo_id = <id>`) to every signal query below.
-
-**If `--scope user` (default)**, scan across ALL repositories — no repo filter, **unless `--exclude` is set**.
-
-**If `--exclude` is set** (any scope), add an exclusion filter to every query below:
+This is a narrative read, not a keyword scan. Pull one row per recent session — title, what was done, what's next — and read it chronologically, the same way you'd read a daily log:
 
 ```sql
--- Add to the WHERE clause of every signal query:
-AND s.repository NOT ILIKE '%<excluded-repo-name>%'
-```
-
-For multiple excludes, chain them:
-```sql
-AND s.repository NOT ILIKE '%VSDream%'
-AND s.repository NOT ILIKE '%jp-kelly%'
-```
-
-Use targeted SQL — not full reads. Each query targets a specific signal type. **Run all 6 categories below** — keyword matching alone misses most preferences, which are expressed through behavioral patterns, not explicit "I prefer" statements.
-
-**1. User corrections** (highest priority — explicit corrections of agent behavior):
-
-```sql
-SELECT s.created_at, s.repository, LEFT(t.user_message, 300) as msg
-FROM turns t
-JOIN sessions s ON t.session_id = s.id
-WHERE t.user_message ILIKE '%actually%'
-   OR t.user_message ILIKE '%no,%'
-   OR t.user_message ILIKE '%wrong%'
-   OR t.user_message ILIKE '%incorrect%'
-   OR t.user_message ILIKE '%not right%'
-   OR t.user_message ILIKE '%stop doing%'
-   OR t.user_message ILIKE '%don''t do%'
-   OR t.user_message ILIKE '%don''t try%'
-   OR t.user_message ILIKE '%stop trying%'
-   OR t.user_message ILIKE '%I meant%'
-   OR t.user_message ILIKE '%that''s not%'
-   OR t.user_message ILIKE '%I did not ask%'
-   OR t.user_message ILIKE '%I want to run%'
-   OR t.user_message ILIKE '%willy-nilly%'
-ORDER BY s.created_at DESC
-LIMIT 50;
-```
-
-**2. Explicit preferences** (direct statements of preference):
-
-```sql
-SELECT s.created_at, s.repository, LEFT(t.user_message, 300) as msg
-FROM turns t
-JOIN sessions s ON t.session_id = s.id
-WHERE t.user_message ILIKE '%I prefer%'
-   OR t.user_message ILIKE '%always use%'
-   OR t.user_message ILIKE '%never use%'
-   OR t.user_message ILIKE '%I like%'
-   OR t.user_message ILIKE '%I don''t like%'
-   OR t.user_message ILIKE '%from now on%'
-   OR t.user_message ILIKE '%going forward%'
-   OR t.user_message ILIKE '%remember that%'
-   OR t.user_message ILIKE '%keep in mind%'
-   OR t.user_message ILIKE '%make sure to%'
-   OR t.user_message ILIKE '%default to%'
-ORDER BY s.created_at DESC
-LIMIT 50;
-```
-
-**3. Deliberation and interaction style** (how the user works with agents — critical for global preferences):
-
-```sql
-SELECT s.created_at, s.repository, LEFT(t.user_message, 300) as msg
-FROM turns t
-JOIN sessions s ON t.session_id = s.id
-WHERE t.user_message ILIKE '%discuss%'
-   OR t.user_message ILIKE '%your thoughts%'
-   OR t.user_message ILIKE '%give me your thoughts%'
-   OR t.user_message ILIKE '%give me a list%'
-   OR t.user_message ILIKE '%running list%'
-   OR t.user_message ILIKE '%spot check%'
-   OR t.user_message ILIKE '%back burner%'
-   OR t.user_message ILIKE '%pivot to%'
-   OR t.user_message ILIKE '%moving on%'
-   OR t.user_message ILIKE '%review the plan%'
-   OR t.user_message ILIKE '%plan docs%'
-   OR t.user_message ILIKE '%prepopulate%'
-   OR t.user_message ILIKE '%don''t touch%'
-   OR t.user_message ILIKE '%leave it%'
-ORDER BY s.created_at DESC
-LIMIT 50;
-```
-
-**4. Process and code decisions** (durable conventions, versioning, architecture):
-
-```sql
-SELECT s.created_at, s.repository, LEFT(t.user_message, 300) as msg
-FROM turns t
-JOIN sessions s ON t.session_id = s.id
-WHERE t.user_message ILIKE '%convention%'
-   OR t.user_message ILIKE '%naming%'
-   OR t.user_message ILIKE '%versioning%'
-   OR t.user_message ILIKE '%release candidate%'
-   OR t.user_message ILIKE '%soak test%'
-   OR t.user_message ILIKE '%full update%'
-   OR t.user_message ILIKE '%patching%'
-   OR t.user_message ILIKE '%recommended way%'
-   OR t.user_message ILIKE '%stability over%'
-   OR t.user_message ILIKE '%architecture%'
-ORDER BY s.created_at DESC
-LIMIT 50;
-```
-
-**5. Frustration / recurring patterns** (things the user keeps having to repeat — highest-value signal):
-
-```sql
-SELECT s.created_at, s.repository, LEFT(t.user_message, 300) as msg
-FROM turns t
-JOIN sessions s ON t.session_id = s.id
-WHERE t.user_message ILIKE '%again%'
-   OR t.user_message ILIKE '%every time%'
-   OR t.user_message ILIKE '%keep forgetting%'
-   OR t.user_message ILIKE '%as usual%'
-   OR t.user_message ILIKE '%same as before%'
-   OR t.user_message ILIKE '%we always%'
-   OR t.user_message ILIKE '%the usual%'
-   OR t.user_message ILIKE '%still getting%'
-   OR t.user_message ILIKE '%stuck again%'
-   OR t.user_message ILIKE '%password prompt%'
-ORDER BY s.created_at DESC
-LIMIT 50;
-```
-
-**6. Goals and directives** (what the user is trying to accomplish — useful for context):
-
-```sql
-SELECT s.created_at, s.repository, LEFT(t.user_message, 300) as msg
-FROM turns t
-JOIN sessions s ON t.session_id = s.id
-WHERE t.user_message ILIKE '%the goal is%'
-   OR t.user_message ILIKE '%I want to%'
-   OR t.user_message ILIKE '%I need to%'
-   OR t.user_message ILIKE '%we should%'
-   OR t.user_message ILIKE '%we will use%'
-   OR t.user_message ILIKE '%all future%'
-ORDER BY s.created_at DESC
+SELECT s.created_at, s.repository, s.agent_name,
+       c.title, c.work_done, c.next_steps
+FROM checkpoints c
+JOIN sessions s ON c.session_id = s.session_id
+-- add scope/exclude/window filters here
+ORDER BY s.created_at ASC
 LIMIT 30;
+```
+
+If a session has no checkpoint, fall back to its first and last user turn for the same chronological read:
+
+```sql
+SELECT s.created_at, s.repository, s.agent_name, LEFT(t.user_message, 200) as msg
+FROM turns t
+JOIN sessions s ON t.session_id = s.id
+-- add scope/exclude/window filters here
+ORDER BY s.created_at ASC
+LIMIT 60;
+```
+
+Read this like a log: what happened, in what order, in which repo. Note anything that looks like a correction, a stated preference, a recurring frustration, or a decision — the same things a keyword search would look for, but found by understanding rather than pattern-matching.
+
+### Step 3: Targeted grep (secondary, confirmatory only)
+
+Only run this if Step 2 surfaced something you want to confirm or quote exactly. Pick the narrowest query for the specific thing you suspect — don't run a fixed battery of categories. Example: if the digest suggests a correction about test-running, confirm it narrowly:
+
+```sql
+SELECT s.created_at, s.repository, LEFT(t.user_message, 300) as msg
+FROM turns t
+JOIN sessions s ON t.session_id = s.id
+WHERE t.user_message ILIKE '%run the test%'
+   OR t.user_message ILIKE '%run it myself%'
+ORDER BY s.created_at DESC
+LIMIT 10;
 ```
 
 ### Drift detection
 
-After scanning turns, check whether existing memory has **drifted** — facts that contradict what you see in the session store or codebase now. Compare each existing memory entry against:
+Compare what the digest shows against existing memory. Flag (don't silently fix):
 
-- **Server/infrastructure changes** — e.g., if memory says "aws1" but recent sessions mention "aws2", flag the migration
-- **Tool/dependency changes** — e.g., "yarn" → "pnpm", "sdl-clock" → "sdl3-clock"
-- **Naming changes** — e.g., branch "develop" → "main", directory "v4/" → "app/"
-- **Workflow changes** — e.g., "buildroot only" → "buildroot + Trixie"
+- **Server/infrastructure changes** — e.g., memory says "aws1" but recent sessions mention "aws2"
+- **Tool/dependency changes** — e.g., "yarn" → "pnpm"
+- **Naming changes** — e.g., branch "develop" → "main"
+- **Workflow changes** — e.g., a stated goal that's since been completed or superseded
 
-For each drift found, note: the old memory entry, the new evidence, and whether to update or supplement.
+For each drift found, note: the old memory entry, the new evidence, and whether it should be updated or just flagged as an open question.
 
-### Don't exhaustively read
-
-Don't read every turn. Look only for things you already suspect matter based on the pattern matches above. If a query returns 50 results, skim for repeated themes across repos — those are the durable, global preferences. A one-off comment in a single repo is likely project-specific (belongs in repo memory, not user memory).
-
-### Step 3: Check session files for context
+### Step 4: Session files (only if needed for context)
 
 ```sql
--- What files were touched in recent sessions?
 SELECT s.created_at, s.repository, sf.file_path, sf.event_type
 FROM session_files sf
 JOIN sessions s ON sf.session_id = s.session_id
-WHERE s.created_at > now() - INTERVAL '7 days'
+-- add scope/exclude/window filters here
 ORDER BY s.created_at DESC
 LIMIT 50;
 ```
 
-### Step 4: Check checkpoints for work summaries
+### Step 5: Git activity (repo-scoped dreams only)
 
-```sql
--- Recent checkpoint summaries show what was accomplished
-SELECT s.created_at, s.repository, c.title, c.work_done, c.next_steps
-FROM checkpoints c
-JOIN sessions s ON c.session_id = s.session_id
-WHERE s.created_at > now() - INTERVAL '7 days'
-ORDER BY s.created_at DESC
-LIMIT 20;
-```
-
-### Step 5: Gather git activity (repo-scoped dreams only)
-
-When consolidating repo memory (`DREAM_MEMORY_SCOPE=repo`), also mine git for durable signals — architecture decisions, dependency changes, and patterns that are evident in the codebase but may not have been explicitly stated in any session.
+When consolidating repo memory, also check git for durable signals not necessarily stated in any session:
 
 ```bash
-# Recent commit messages show decisions and direction
 git log --oneline --since="$(date -v-7d +%Y-%m-%d 2>/dev/null || date -d '7 days ago' +%Y-%m-%d)" 2>/dev/null | head -30
-
-# Files changed recently show where work is happening
-git diff --stat HEAD~20 HEAD 2>/dev/null | tail -20
-
-# Check for dependency changes
 git log --oneline --all -- package.json requirements.txt Cargo.toml go.mod pom.xml 2>/dev/null | head -10
 ```
 
-Look for:
-- **Decisions encoded in commits** — "switch to pnpm", "migrate to PostgreSQL", "refactor auth to JWT"
-- **Patterns** — consistent commit message style, testing conventions, branching strategy
-- **Active areas** — which files/directories are being actively worked on
-- **Drift detection** — does the codebase contradict anything in current memory?
-
-Only extract things that are **durable and evidence-backed**. A single WIP commit is not evidence; a merged pattern across multiple commits is.
-
-### What to extract
-
-For each finding, note:
-- **The fact** — What was said or decided
-- **The date** — Use the `created_at` timestamp from the session (ISO 8601: YYYY-MM-DD)
-- **The repository** — Which project this applies to (from `s.repository`)
-- **Confidence** — Was it an explicit instruction (high) or implied preference (medium)?
-- **Contradictions** — Does this conflict with anything currently in memory?
-- **Evidence** — What backs this up? (session turn, git commit, checkpoint summary)
+Only extract things that are **durable and evidence-backed** — a single WIP commit is not evidence; a pattern across multiple commits is.
 
 ### Distinguishing global vs. project-specific
 
-This is the most important judgment call in a `--scope user` dream:
+The most important judgment call in a `--scope user` dream:
 
-- **A pattern that repeats across multiple repos** → global user preference. Write to `/memories/`.
-- **A pattern that appears in one repo only** → project-specific. Belongs in `/memories/repo/<repo-slug>/`, not user memory.
-- **A one-off comment** → likely not durable. Skip it unless it's an explicit, emphatic instruction.
-
-Examples:
-- "I want to run the script myself" said in archive-portal-api AND "I want to do the test" said in indexhibit → **global preference** (agent should offer to let user run things, not auto-run)
-- "Use SDL3 libraries" said only in clock8002 → **repo-specific** (belongs in clock8002 repo memory)
-- "Don't use the sandbox" said in jp-kelly.com AND archive-portal-api → **global preference** (already in memory, reinforced)
+- **Repeats across multiple repos** → global user preference → `/memories/`
+- **Appears in one repo only** → project-specific → `/memories/repo/<repo-slug>/`
+- **A one-off comment** → likely not durable — skip unless explicit and emphatic
 
 ### Report open questions — never invent facts
 
-If something looks important but you can't confirm it from the evidence, **do not guess**. Instead, collect it as an open question for Phase 3:
+If something looks important but unconfirmed, collect it as an open question for the final report instead of guessing:
 
 ```
 OPEN QUESTIONS:
-- Is the user still using pnpm, or have they switched? (saw a reference to yarn in a 30-day-old session)
-- What is the deploy target for the new project? (no sessions mention it yet)
+- Is the user still using pnpm, or have they switched?
 ```
 
-Open questions are reported in the final summary but never written to memory as facts.
-
-### Adjustable time window
-
-All queries above use the full history. To focus on recent signal, add:
-
-```sql
-WHERE s.created_at > now() - INTERVAL '7 days'
-```
-
-Adjust the interval (`'1 day'`, `'30 days'`, etc.) based on dream frequency. The default should match your `DREAM_WINDOW` config (default: `7 days`).
+Open questions are reported but never written to memory as facts.
 
 ---
 
@@ -518,7 +369,7 @@ Adjust the interval (`'1 day'`, `'30 days'`, etc.) based on dream frequency. The
 
 3. **Delete contradicted facts.** If memory says "Prefers tabs" but a recent session has the user saying "Use spaces", remove the old entry and write the new one. Add a note: `(Updated YYYY-MM-DD, previously: tabs)`. Retain the newer, better-supported fact; remove the outdated claim.
 
-4. **Preserve source attribution.** When adding a new memory entry, note where it came from: `(source: session YYYY-MM-DD, repo: <name>)`.
+4. **Cite the date, not a metadata block.** The entry's own date is its provenance. Don't append `(source: ..., repo: ..., confidence: ...)` to every line — that's report detail, not something worth loading into context on every session.
 
 5. **Report open questions, don't invent.** If you suspect something is worth remembering but can't confirm it from evidence, add it to the open-questions list in the final report. Never write an unconfirmed guess to memory as if it were a fact.
 
@@ -535,12 +386,21 @@ Adjust the interval (`'1 day'`, `'30 days'`, etc.) based on dream frequency. The
    - `facts.md` — Project-specific knowledge, architecture notes
    - Create new topic files only when existing ones don't fit
 
-8. **Entry format.** Each memory entry should be concise:
+8. **Entry format.** Each memory entry is one line, date first:
    ```markdown
-   - [YYYY-MM-DD] The fact or preference. (source: session, repo: <name>, confidence: high/medium)
+   - [YYYY-MM-DD] The fact or preference.
    ```
 
 9. **Brevity.** Memory files are loaded into context automatically. Keep entries to single lines where possible. Use bullet points, not paragraphs.
+
+10. **Frontmatter is the index.** Every topic file starts with:
+    ```markdown
+    ---
+    name: preferences
+    description: How the user likes things done — one line, under 150 chars
+    ---
+    ```
+    Keep `description` accurate and current — it's what future sessions see before opening the file, so a stale description is a stale index.
 
 ### How to write
 
@@ -568,15 +428,9 @@ Last consolidated: 2026-08-15
 | facts.md | Project knowledge, architecture notes | 2026-08-08 |
 ```
 
-### Safety: backup before first run
+### Safety: dry run is the default
 
-On the very first dream against a scope, back up existing memory:
-
-```
-memory(view, "/memories/")
-```
-
-Then manually copy the content of each file to a backup location before proceeding. Alternatively, use the `--dry-run` flag (see Safety section below) on first use.
+A dream never writes unless `--apply` was passed (see Safety section below). Phase 3 always produces its findings; whether they're written depends entirely on that flag.
 
 ---
 
@@ -586,20 +440,18 @@ Then manually copy the content of each file to a backup location before proceedi
 
 ### Prune stale entries
 
-Remove or archive entries that are:
-- More than 90 days old with no references in recent sessions
-- Contradicted by newer entries (should have been caught in Phase 3)
-- About projects/repos that no longer exist in the session store
+Pruning is **contradiction-based, not age-based**. A preference stated once six months ago is still true until something contradicts it. Remove or archive an entry only when:
+- It's **contradicted** by a newer, better-supported fact (should have been resolved in Phase 3 already)
+- It **points at something that no longer exists** — a repo, a referenced repo-memory file, a deprecated tool
+- It's **superseded** — the goal it described has been completed and replaced by a new one (note this, don't just delete: `(Superseded YYYY-MM-DD — <what replaced it>)`)
 
-To check if a repo is still active:
+To check if a repo still exists in the session store (useful for "points at something that no longer exists"):
 
 ```sql
 SELECT MAX(created_at) as last_active
 FROM sessions
 WHERE repository = '<repo-name>';
 ```
-
-If `last_active` is more than 90 days ago, demote its memory entries to an `archive.md` topic file rather than deleting them outright.
 
 ### Size limits
 
@@ -619,7 +471,7 @@ Within each file, order entries:
 
 ### Record the dream timestamp
 
-After completing all 4 phases, write the timestamp so the auto-trigger knows when you last dreamed. The location depends on scope:
+**Only if `--apply` was passed.** A preview run (the default) never writes a timestamp, a log entry, or anything else — it produced a report and nothing more. When `--apply` was passed, write the timestamp so the auto-trigger knows when you last dreamed. The location depends on scope:
 
 **For `--scope user`:**
 
@@ -662,9 +514,9 @@ echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) | scope: <scope> | workspace: <repo-or-all>
 
 - **Never delete memory without replacement.** If removing an entry, either it was contradicted (replaced by a newer entry) or it was moved (to a topic file or archive). Never just delete.
 
-### Soft guidelines
+- **Preview is the default, not an option.** Every dream runs Phases 1–4 and produces a report. **Only write to `/memories/` if `--apply` was explicitly passed.** Without it, no `memory(create)`, `memory(str_replace)`, `memory(insert)`, or `memory(delete)` call may be made — report the findings and stop.
 
-- **Dry run option.** On first use or when uncertain, run Phases 1–2 and only **print** what you WOULD change in Phase 3, without writing. Confirm with the user before applying. Use the `--dry-run` argument to enable this mode.
+### Soft guidelines
 
 - **Cross-model safety.** The session store contains turns from all models. When consolidating, note which model was used if it's relevant (some models may have different conventions or capabilities that affected the conversation).
 
@@ -686,7 +538,7 @@ After running, verify the consolidation:
 
 ### Change report format
 
-The report must be **concise, scannable, and clearly indicate what will change**. Use a simple table format — one row per change, no diffs, no context lines, no prose paragraphs. The user should be able to scan it in seconds and know exactly what would happen.
+The report must be **concise and scannable** — a table for the at-a-glance view, plus a **unified diff** underneath for anyone who wants the precise before/after. No prose paragraphs.
 
 ```text
 ═══ DREAM REPORT ═══
@@ -694,50 +546,48 @@ Date:    2026-08-15 14:32 UTC
 Scope:   user
 Window:  7 days · 37 sessions · 20 models
 
-─── CHANGES (15) ───
+─── CHANGES (3) ───
 ACTION   FILE                    ENTRY
 ADD      preferences.md          Prefers to run tests himself, not agent
-ADD      preferences.md          Prefers full updates, not patching
-ADD      preferences.md           Prefers stability over recovery (embedded)
-UPDATE   workflow-jp-kelly.md     Server: aws1 → aws2 (decommissioned)
-UPDATE   decisions.md             Branch: "develop" → "main"
-REMOVE   MEMORY.md                Stale ref to nonexistent.md
-CREATE   corrections.md           New file — 1 entry
+UPDATE   workflow-jp-kelly.md    Server: aws1 → aws2 (decommissioned)
+CREATE   corrections.md          New file — 1 entry
 
-─── DRIFT (3) ───
+─── DIFF ───
+--- workflow-jp-kelly.md
++++ workflow-jp-kelly.md
+@@ -5 +5 @@
+-- Server work (SSH to aws1.smallgod.net): ...
++- Server work (SSH to aws2.smallgod.net): ... (aws1 decommissioned 2026-08-13)
+
+─── DRIFT (1) ───
 FILE                    ISSUE                          EVIDENCE
 workflow-jp-kelly.md    Says "aws1" but aws1 is dead   Session 2026-08-13
-jp-indexhibit-prefs.md  "Current goal: build"         Installer working since 2026-08-13
-workflow-jp-kelly.md    Refs deploy-pipeline.md       File doesn't exist in /memories/repo/
 
-─── OPEN QUESTIONS (2) ───
+─── OPEN QUESTIONS (1) ───
 - Is AWS2 fully primary, or is AWS1 still needed for some services?
-- Do referenced repo memory files exist elsewhere or need creation?
 
 ─── SUMMARY ───
-Added 12 · Updated 2 · Removed 1 · Created 1 · Drift 3 · Questions 2
-Status: DRY RUN — no files modified
+Added 1 · Updated 1 · Created 1 · Drift 1 · Questions 1
+Status: PREVIEW — no files modified (pass --apply to write)
 ```
 
 **Rules for the report:**
-- **One line per change** — no multi-line diffs, no context lines
-- **ACTION column** — `ADD`, `UPDATE`, `REMOVE`, `CREATE` (capitalized, fixed width)
-- **FILE column** — just the filename, no full path
-- **ENTRY column** — short description, not the full memory text (max ~60 chars)
-- **DRIFT section** — separate from changes; shows what's stale and the evidence
+- **CHANGES table** — one line per change: `ADD`/`UPDATE`/`REMOVE`/`CREATE`, filename only, short entry description (max ~60 chars)
+- **DIFF** — a real unified diff for each changed file, so the exact before/after is visible
+- **DRIFT** — separate from changes; shows what's stale and the evidence
 - **OPEN QUESTIONS** — things that look important but unconfirmed
-- **SUMMARY** — one line: counts + status (dry run or applied)
-- If nothing changed:
+- **SUMMARY** — one line: counts + status
+- If nothing changed, say so and stop — don't emit an empty table:
 
 ```text
 ═══ DREAM REPORT ═══
 No changes needed. Memory is already current.
-Status: DRY RUN — no files modified
+Status: PREVIEW — no files modified
 ```
 
-**In `--dry-run` mode:** the report is printed but nothing is written. The status line must say `DRY RUN — no files modified`.
+**Without `--apply` (the default):** the report is produced and nothing is written. Status line: `PREVIEW — no files modified (pass --apply to write)`.
 
-**When applied (no `--dry-run`):** the report is printed AND changes are written. The status line says `APPLIED — N files modified`.
+**With `--apply`:** the report is produced AND the changes in it are written. Status line: `APPLIED — N files modified`.
 
 ---
 
@@ -755,7 +605,9 @@ With flags (examples):
 > Run the dream skill with --scope repo --workspace jp-kelly
 > Run the dream skill with --scope repo --all
 > Run the dream skill with --scope repo --workspace jp-kelly --workspace VSDream
-> Run the dream skill with --dry-run --scope repo --workspace jp-kelly
+> Run the dream skill with --scope repo --workspace jp-kelly --apply
+
+Every run above is a **preview only** unless `--apply` is included — add it once you've reviewed the report and want the changes written.
 
 ### Automatic run
 
@@ -793,10 +645,11 @@ DREAM_WINDOW=7 days
 # Minimum hours between automatic dreams
 DREAM_INTERVAL_HOURS=24
 
-# Dry run mode (preview only, no writes)
-DREAM_DRY_RUN=false
+# Whether a dream is allowed to write to memory. false = always preview only.
+# Runtime flag: --apply (overrides this to true for a single run)
+DREAM_APPLY=false
 
-# Maximum lines per memory file before archiving
+# Maximum lines per memory file before splitting
 DREAM_MAX_LINES=200
 ```
 

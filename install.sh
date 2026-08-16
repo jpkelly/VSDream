@@ -86,7 +86,7 @@ if [[ $FORCE -eq 1 ]] || [[ ! -f "$SKILL_DIR/.dream-config" ]]; then
 DREAM_MEMORY_SCOPE=user
 DREAM_WINDOW=7 days
 DREAM_INTERVAL_HOURS=24
-DREAM_DRY_RUN=false
+DREAM_APPLY=false
 DREAM_MAX_LINES=200
 EOF
     fi
