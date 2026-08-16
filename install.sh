@@ -6,10 +6,10 @@
 # sets up auto-trigger configuration.
 #
 # Usage:
-#   bash install.sh              # Install skill only (manual run)
-#   bash install.sh --auto        # Install skill + set up auto-trigger guidance
-#   bash install.sh --uninstall   # Remove skill
-#   bash install.sh --force       # Force overwrite existing install
+#   bash install.sh              # Install or update (overwrites skill files, preserves .dream-config)
+#   bash install.sh --auto       # Install/update + set up auto-trigger guidance
+#   bash install.sh --uninstall   # Remove skill (preserves /memories/)
+#   bash install.sh --force       # Same as default now (kept for compatibility)
 
 set -euo pipefail
 
@@ -51,14 +51,17 @@ if [[ $UNINSTALL -eq 1 ]]; then
 fi
 
 # --- Check for existing install ---
-if [[ -d "$SKILL_DIR" && $FORCE -eq 0 ]]; then
-    if [[ -f "$SKILL_DIR/SKILL.md" ]]; then
-        warn "VSDream is already installed at $SKILL_DIR"
-        echo ""
-        info "To reinstall: bash install.sh --force"
-        info "To uninstall: bash install.sh --uninstall"
-        exit 0
+INSTALLED_BEFORE=0
+if [[ -d "$SKILL_DIR" && -f "$SKILL_DIR/SKILL.md" ]]; then
+    INSTALLED_BEFORE=1
+    if [[ $FORCE -eq 0 ]]; then
+        info "VSDream is already installed at $SKILL_DIR — updating files..."
+    else
+        info "VSDream is already installed — force-updating files..."
     fi
+    # Fall through to copy step (overwrites existing files)
+else
+    info "Installing VSDream for the first time..."
 fi
 
 # --- Install skill ---
@@ -107,6 +110,10 @@ echo ""
 info "=== step: Installation complete ==="
 echo ""
 ok "VSDream is installed!"
+if [[ $INSTALLED_BEFORE -eq 1 ]]; then
+    echo ""
+    info "Updated existing install — skill files overwritten, .dream-config preserved."
+fi
 echo ""
 info "To run manually, tell VS Code chat:"
 info "  \"Run the dream skill. Read SKILL.md and execute all 4 phases.\""
