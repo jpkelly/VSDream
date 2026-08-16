@@ -1,0 +1,35 @@
+# VSDream Configuration Template
+# Copy to .dream-config and edit as needed
+
+# Memory scope to consolidate:
+#   user    — /memories/ (persistent, cross-workspace) [default]
+#   repo    — /memories/repo/ (per-repository, current workspace or --workspace)
+#   session — /memories/session/ (current conversation only, rarely useful)
+# Runtime flag: --scope user|repo|session
+DREAM_MEMORY_SCOPE=user
+
+# Default workspace(s) for --scope repo (comma-separated repo paths or names)
+# Leave empty to use the current workspace
+# Runtime flag: --workspace /path/to/repo (can be repeated for multiple)
+DREAM_WORKSPACES=
+
+# If true, --scope repo dreams iterate all known repositories from the session store
+# Runtime flag: --all
+DREAM_ALL=false
+
+# How far back to scan sessions in the cloud session store:
+#   1 day, 7 days, 30 days, 90 days, or "all"
+# Runtime flag: --window 30 days
+DREAM_WINDOW=7 days
+
+# Minimum hours between automatic dreams
+DREAM_INTERVAL_HOURS=24
+
+# Dry run mode: preview changes without writing to memory
+#   true  — Phase 3 only prints what it would change
+#   false — Phase 3 writes to memory files [default]
+# Runtime flag: --dry-run
+DREAM_DRY_RUN=false
+
+# Maximum lines per memory file before entries are archived
+DREAM_MAX_LINES=200
