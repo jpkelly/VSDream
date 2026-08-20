@@ -8,6 +8,8 @@
 # Usage:
 #   ./test-dream.sh setup     Create test fixtures with known issues
 #   ./test-dream.sh verify    Check consolidation results after running /dream
+#   ./test-dream.sh scan      Run scan-local-sessions.py fixture self-test
+#   ./test-dream.sh skill     Check SKILL.md requires native vscode_askQuestions
 #   ./test-dream.sh teardown  Remove test fixtures
 #
 # Workflow:
@@ -18,6 +20,7 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TEST_DIR="$HOME/.vscode/skills/dream/test-fixtures"
 MEMORY_DIR="$TEST_DIR/memories"
 
@@ -120,6 +123,66 @@ MEMEOF
     echo "      using $MEMORY_DIR as the memory directory instead of /memories/)"
     echo "  3. After it completes, run: $0 verify"
     echo ""
+}
+
+# ============================================================================
+# SCANNER - Flavor-agnostic local session helper
+# ============================================================================
+do_scan_test() {
+    local scanner="$SCRIPT_DIR/scan-local-sessions.py"
+    if [[ ! -f "$scanner" ]]; then
+        fail "scan-local-sessions.py not found next to test-dream.sh"
+        exit 1
+    fi
+    info "=== step: Running scan-local-sessions.py --self-test ==="
+    python3 "$scanner" --self-test
+}
+
+# ============================================================================
+# SKILL TEXT - Static checks that the skill still requires native Q&A
+# ============================================================================
+do_skill_text_test() {
+    local skill="$SCRIPT_DIR/SKILL.md"
+    if [[ ! -f "$skill" ]]; then
+        fail "SKILL.md not found next to test-dream.sh"
+        exit 1
+    fi
+
+    info "=== step: Checking SKILL.md requires vscode_askQuestions ==="
+    echo ""
+
+    local total=0
+    local passed=0
+    run_check() {
+        total=$((total + 1))
+        if eval "$1"; then
+            pass "$2"
+            passed=$((passed + 1))
+        else
+            fail "$2"
+        fi
+    }
+
+    run_check "grep -q 'vscode_askQuestions' \"$skill\"" \
+        "SKILL.md mentions vscode_askQuestions"
+    run_check "grep -q 'Ask open questions with the native picker' \"$skill\"" \
+        "SKILL.md has the required native-picker section"
+    run_check "grep -q 'Do not dump questions as chat prose' \"$skill\"" \
+        "SKILL.md forbids chat-prose questions"
+    run_check "! grep -q 'GoaAsk' \"$skill\"" \
+        "Phase 3 header is not corrupted"
+    run_check "grep -q 'Ask open questions with \`vscode_askQuestions\`, don.t invent' \"$skill\"" \
+        "Phase 3 rule 5 requires the native picker"
+
+    echo ""
+    echo "=============================="
+    echo -e "  Results: ${passed}/${total} checks passed"
+    echo "=============================="
+    echo ""
+
+    if [[ $passed -ne $total ]]; then
+        exit 1
+    fi
 }
 
 # ============================================================================
@@ -276,14 +339,22 @@ case "${1:-}" in
     verify)
         do_verify
         ;;
+    scan)
+        do_scan_test
+        ;;
+    skill)
+        do_skill_text_test
+        ;;
     teardown)
         do_teardown
         ;;
     *)
-        echo "Usage: $0 {setup|verify|teardown}"
+        echo "Usage: $0 {setup|verify|scan|skill|teardown}"
         echo ""
         echo "  setup     - Create test fixtures with known issues"
         echo "  verify    - Check if dream skill fixed the issues"
+        echo "  scan      - Run scan-local-sessions.py fixture self-test"
+        echo "  skill     - Check SKILL.md requires native vscode_askQuestions"
         echo "  teardown  - Remove test fixtures"
         exit 1
         ;;

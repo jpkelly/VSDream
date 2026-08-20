@@ -1,6 +1,6 @@
 ---
 name: dream
-description: "Model-agnostic memory consolidation skill for VS Code native chat. Scans all past sessions across models (Copilot, Claude, GPT, etc.) via the cloud session store, extracts corrections, decisions, preferences, and recurring patterns, then merges findings into persistent VS Code memory files (/memories/). Auto-triggers via a 24-hour timer. Inspired by Claude's Dreams feature and how sleep consolidates human memory."
+description: "Model-agnostic memory consolidation skill for VS Code native chat. Scans all past sessions across models (Copilot, Claude, GPT, etc.) via the cloud session store AND local chat JSONL from every VS Code flavor (Stable, Insiders, Exploration, VSCodium) so a dream started in one app still sees the other's history. Extracts corrections, decisions, preferences, and recurring patterns, then merges findings into persistent VS Code memory files (/memories/). Auto-triggers via a 24-hour timer. Inspired by Claude's Dreams feature and how sleep consolidates human memory."
 tags: [memory, maintenance, consolidation, autonomous, cross-model]
 ---
 
@@ -20,10 +20,10 @@ The key difference from Claude's Dreams API: this version is **completely model-
 | Concern | Claude Dreams (original) | VSDream (this skill) |
 |---------|--------------------------|----------------------|
 | Model | Claude only | Any model in VS Code chat |
-| Session history | Claude's Managed Agent sessions | VS Code cloud session store (all models) |
+| Session history | Claude's Managed Agent sessions | Cloud session store + local JSONL from every VS Code flavor |
 | Memory store | Claude memory stores (`/mnt/memory/`) | VS Code `/memories/` (user, session, repo scopes) |
 | Trigger | Dreams API (async job) | Manual or 24h auto-timer |
-| Query method | `client.beta.dreams.create()` | `session_store_sql` (DuckDB queries) |
+| Query method | `client.beta.dreams.create()` | `session_store_sql` + `scan-local-sessions.py` |
 | Output | New separate memory store | Updated `/memories/` files in-place |
 
 Because it relies on VS Code's tooling — not any model's API — the same dream works whether you ran yesterday's session with Copilot, last week's with Claude, or last month's with GPT.
@@ -48,7 +48,8 @@ The dream accepts flags that control **what memory to consolidate** and **which 
 | `--workspace` | `<repo-path>` or `<repo-name>` | Target a specific repository's memory (implies `--scope repo`). Can be repeated for multiple repos. |
 | `--all` | (no value) | Consolidate across ALL known repositories. With `--scope repo`, iterates every repo that has memory or recent sessions. |
 | `--exclude` | `<repo-path>` or `<repo-name>` | Exclude a repo's sessions from scanning. Can be repeated for multiple. Useful for avoiding self-referential noise (e.g. `--exclude VSDream`). |
-| `--window` | `1 day`, `7 days`, `30 days`, `90 days`, `all` | How far back to scan sessions (overrides config) |
+| `--window` | `1 day`, `7 days`, `30 days`, `90 days`, `1 year`, `all` | How far back to scan sessions (overrides config) |
+| `--flavors` | `all` (default), `current`, `stable`, `insiders`, `none` | Which local VS Code installs to scan for chat JSONL. Cloud store is always queried. |
 | `--apply` | (no value) | Write the changes to memory. **Without this flag, every dream is a preview only** — this mirrors the original dream prompt's caution: a dream reports what it found and proposes changes, it does not silently rewrite your memory. |
 | `--force` | (no value) | Skip the time-since-last-dream check |
 
@@ -112,6 +113,7 @@ First, parse the flags from the user's invocation message. Look for:
 - `--workspace <path-or-name>` — target a specific repo (can appear multiple times). Implies `--scope repo`.
 - `--exclude <path-or-name>` — exclude a repo's sessions from scanning (can appear multiple times)
 - `--all` — consolidate across all known repositories
+- `--flavors <all|current|stable|insiders|none>` — overrides `DREAM_LOCAL_FLAVORS` config
 - `--window <interval>` — overrides `DREAM_WINDOW` config
 - `--apply` — overrides `DREAM_APPLY` config; without it, the dream never writes
 - `--force` — skip the last-dream time check
@@ -230,11 +232,11 @@ You should now have a mental map of:
 
 ## Phase 2: GATHER SIGNAL
 
-**Goal:** Extract important information recently learned — like a reflective pass over what happened, not an exhaustive audit. This is the model-agnostic phase: it reads the cloud session store that captures ALL past sessions regardless of which model ran them.
+**Goal:** Extract important information recently learned — like a reflective pass over what happened, not an exhaustive audit. This is the model-agnostic **and flavor-agnostic** phase: it reads the cloud session store (all models) **and** local chat JSONL from every VS Code install on this machine (Stable, Insiders, and any other flavor that exists). A dream started in Insiders must still see Stable's local history, and vice versa.
 
 Sources in priority order — **read narrative first, grep second**:
 
-1. **Session digest** (primary) — a chronological read of recent sessions: what each was about, what was done, what came next. This is the model-agnostic equivalent of reading a session log.
+1. **Session digest** (primary) — a chronological read of recent sessions: what each was about, what was done, what came next. Build this from **both** the cloud store and the local flavor scan. Cloud is usually thinner and newer; local JSONL is where older / other-app history lives.
 2. **Existing memory that drifted** — facts that contradict what the digest or codebase shows now.
 3. **Targeted grep** (secondary, confirmatory only) — if the digest surfaces a theme you want to confirm or quote precisely (e.g. "was that phrased as a hard rule?"), run one narrow keyword query. Don't run a battery of queries by default.
 
@@ -289,6 +291,57 @@ LIMIT 60;
 
 Read this like a log: what happened, in what order, in which repo. Note anything that looks like a correction, a stated preference, a recurring frustration, or a decision — the same things a keyword search would look for, but found by understanding rather than pattern-matching.
 
+### Source: Local session files (all VS Code flavors)
+
+Cloud store coverage is often short (weeks, not months) and only includes sessions that synced. The rest of the year — and every chat that happened in the *other* VS Code install — lives on disk as JSONL. **Always run this scan unless `--flavors none`.** Do not assume the currently open app is the only source.
+
+The helper is installed next to this skill:
+
+```bash
+python3 ~/.copilot/skills/dream/scan-local-sessions.py \
+  --window "<same --window as this dream>" \
+  --flavors "<DREAM_LOCAL_FLAVORS or --flavors, default all>"
+```
+
+Add `--workspace <name>` / `--exclude <name>` to match Phase 1 flags. Use `--inventory` first if you only need the workspace list. Use `--json` if you need structured output.
+
+**What it discovers (only dirs that exist):**
+
+| OS | User-data roots |
+|----|-----------------|
+| macOS | `~/Library/Application Support/<App>/User` |
+| Linux | `~/.config/<App>/User` |
+| Windows | `%APPDATA%/<App>/User` |
+
+`<App>` for `--flavors all`: `Code`, `Code - Insiders`, `Code - Exploration`, `VSCodium`. Cursor is discovered separately via `--flavors cursor` (different product). Also honors `$VSCODE_USER_DATA_DIR` if set.
+
+Under each User dir it reads:
+
+- `workspaceStorage/*/workspace.json` — folder or `.code-workspace` URI
+- `workspaceStorage/*/chatSessions/*.jsonl` — per-workspace chats
+- `globalStorage/emptyWindowChatSessions/*` — chats with no folder open
+
+**How to treat the digest:**
+
+- Merge it with the cloud digest. Same session id in both places is one session, not two.
+- Prefer cloud `title` / `work_done` / `next_steps` when present; use local user-text snippets when cloud has no checkpoint (common).
+- Do **not** exhaustively read every JSONL. The helper already caps: header + first user turns, skip bodies over 10 MiB, digest capped at 80 sessions.
+- If a row is marked `[oversized — header only]`, do not `read_file` the JSONL unless the user explicitly asked about that workspace. Some local files are hundreds of MB.
+- Honor `--window`, `--workspace`, and `--exclude` the same way as the SQL filters. Local paths are filesystem paths (`/Users/jp/Desktop/NAC26/...`), not GitHub URLs — match on the last path component.
+- Never copy secrets, tokens, `.env` contents, or raw production logs out of JSONL. Quote only durable preferences / decisions.
+
+**`--flavors` values:**
+
+| Value | Meaning |
+|-------|---------|
+| `all` (default) | Every VS Code-family dir that exists (Stable, Insiders, Exploration, VSCodium) |
+| `current` | Only the flavor running this chat (best-effort from env) |
+| `stable` / `insiders` | Only that install |
+| `cursor` | Cursor only (opt-in; not part of `all`) |
+| `none` | Skip local scan; cloud store only |
+
+If the helper is missing (old install), fall back to listing those User dirs yourself with the same rules — then tell the user to re-run `install.sh`.
+
 ### Step 3: Targeted grep (secondary, confirmatory only)
 
 Only run this if Step 2 surfaced something you want to confirm or quote exactly. Pick the narrowest query for the specific thing you suspect — don't run a fixed battery of categories. Example: if the digest suggests a correction about test-running, confirm it narrowly:
@@ -312,7 +365,7 @@ Compare what the digest shows against existing memory. Flag (don't silently fix)
 - **Naming changes** — e.g., branch "develop" → "main"
 - **Workflow changes** — e.g., a stated goal that's since been completed or superseded
 
-For each drift found, note: the old memory entry, the new evidence, and whether it should be updated or just flagged as an open question.
+For each drift found, note: the old memory entry, the new evidence, and whether it should be updated or asked as an open question via `vscode_askQuestions`.
 
 ### Step 4: Session files (only if needed for context)
 
@@ -344,16 +397,28 @@ The most important judgment call in a `--scope user` dream:
 - **Appears in one repo only** → project-specific → `/memories/repo/<repo-slug>/`
 - **A one-off comment** → likely not durable — skip unless explicit and emphatic
 
-### Report open questions — never invent facts
+### Ask open questions with the native picker — required
 
-If something looks important but unconfirmed, collect it as an open question for the final report instead of guessing:
+If something looks important but unconfirmed, it is an **open question**. Never guess. Never write it to memory as a fact.
+
+**You must ask every open question with `vscode_askQuestions`.** Do not dump questions as chat prose or as a markdown list and wait. The report's OPEN QUESTIONS section is only for leftovers *after* the picker — it is not a substitute for the picker.
+
+1. **When.** After Phase 2/3 has a set of open questions, and **before** emitting the DREAM REPORT. On `--apply`, if any question is still unanswered, call the picker again before writing those entries.
+2. **One batch.** Put all questions in a single `vscode_askQuestions` call. Keep it small (typically 1–6). Skip anything whose answer would not change what gets written.
+3. **Shape.** Each item needs a unique `header` (≤50 chars) and a concise `question` (≤200 chars). When the answer space is discrete, offer 2–5 concrete options plus `Unsure / leave open`. Leave `allowFreeformInput` true unless a freeform answer would be meaningless.
+4. **After answers.** Confirmed answers become proposed CHANGES (still preview-only unless `--apply`). `Unsure`, skipped, or unanswered items stay in OPEN QUESTIONS and are never written as facts.
+5. **Tool unavailable.** If `vscode_askQuestions` errors or is missing, list the questions under OPEN QUESTIONS and continue. Do not invent answers. Do not block the report.
 
 ```
-OPEN QUESTIONS:
-- Is the user still using pnpm, or have they switched?
+vscode_askQuestions:
+  questions:
+    - header: Package manager
+      question: Memory says yarn; recent sessions mention pnpm. Which is current?
+      options: [pnpm, yarn, Unsure / leave open]
+    - header: AWS1 status
+      question: AWS1 was marked shut down. Is it fully decommissioned?
+      options: [Decommissioned, Still running, Unsure / leave open]
 ```
-
-Open questions are reported but never written to memory as facts.
 
 ---
 
@@ -371,7 +436,7 @@ Open questions are reported but never written to memory as facts.
 
 4. **Cite the date, not a metadata block.** The entry's own date is its provenance. Don't append `(source: ..., repo: ..., confidence: ...)` to every line — that's report detail, not something worth loading into context on every session.
 
-5. **Report open questions, don't invent.** If you suspect something is worth remembering but can't confirm it from evidence, add it to the open-questions list in the final report. Never write an unconfirmed guess to memory as if it were a fact.
+5. **Ask open questions with `vscode_askQuestions`, don't invent.** If you suspect something is worth remembering but can't confirm it from evidence, ask it via the native picker (see above). Never write an unconfirmed guess to memory as if it were a fact. Never ask those questions as chat prose instead of the picker.
 
 6. **Scope awareness.** Write to the appropriate memory scope:
    - **User memory** (`/memories/`) — Cross-workspace preferences, workflow patterns, tool preferences
@@ -510,7 +575,7 @@ echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) | scope: <scope> | workspace: <repo-or-all>
 
 - **Never edit outside memory.** Do not modify code, infrastructure, dependencies, configuration, or any file outside the `/memories/` scope you're consolidating. The dream touches memory files only.
 
-- **Never invent facts.** If you can't confirm something from evidence, report it as an open question in the summary — do not write it to memory as a fact.
+- **Never invent facts.** If you can't confirm something from evidence, ask it with `vscode_askQuestions`. Do not write it to memory as a fact. Do not ask it as chat prose.
 
 - **Never delete memory without replacement.** If removing an entry, either it was contradicted (replaced by a newer entry) or it was moved (to a topic file or archive). Never just delete.
 
@@ -544,7 +609,7 @@ The report must be **concise and scannable** — a table for the at-a-glance vie
 ═══ DREAM REPORT ═══
 Date:    2026-08-15 14:32 UTC
 Scope:   user
-Window:  7 days · 37 sessions · 20 models
+Window:  7 days · cloud 37 · local stable 12 · local insiders 4 · 20 models
 
 ─── CHANGES (3) ───
 ACTION   FILE                    ENTRY
@@ -564,7 +629,7 @@ FILE                    ISSUE                          EVIDENCE
 workflow-jp-kelly.md    Says "aws1" but aws1 is dead   Session 2026-08-13
 
 ─── OPEN QUESTIONS (1) ───
-- Is AWS2 fully primary, or is AWS1 still needed for some services?
+- Cursor: include in default local scan? (asked via picker; Unsure)
 
 ─── SUMMARY ───
 Added 1 · Updated 1 · Created 1 · Drift 1 · Questions 1
@@ -575,7 +640,7 @@ Status: PREVIEW — no files modified (pass --apply to write)
 - **CHANGES table** — one line per change: `ADD`/`UPDATE`/`REMOVE`/`CREATE`, filename only, short entry description (max ~60 chars)
 - **DIFF** — a real unified diff for each changed file, so the exact before/after is visible
 - **DRIFT** — separate from changes; shows what's stale and the evidence
-- **OPEN QUESTIONS** — things that look important but unconfirmed
+- **OPEN QUESTIONS** — leftovers after `vscode_askQuestions` (Unsure / unanswered). Confirmed picker answers belong in CHANGES, not here.
 - **SUMMARY** — one line: counts + status
 - If nothing changed, say so and stop — don't emit an empty table:
 
@@ -639,8 +704,15 @@ DREAM_EXCLUDE=
 # If true, --scope repo dreams iterate all known repositories
 DREAM_ALL=false
 
-# How far back to scan sessions: 1 day, 7 days, 30 days, 90 days, all
+# How far back to scan sessions: 1 day, 7 days, 30 days, 90 days, 1 year, all
 DREAM_WINDOW=7 days
+
+# Which local VS Code installs to scan for chat JSONL.
+#   all (default) — every flavor dir that exists (Stable, Insiders, …)
+#   current       — only the app running this chat
+#   stable / insiders / none
+# Runtime flag: --flavors all
+DREAM_LOCAL_FLAVORS=all
 
 # Minimum hours between automatic dreams
 DREAM_INTERVAL_HOURS=24

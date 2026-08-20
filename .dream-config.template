@@ -23,10 +23,20 @@ DREAM_EXCLUDE=
 # Runtime flag: --all
 DREAM_ALL=false
 
-# How far back to scan sessions in the cloud session store:
-#   1 day, 7 days, 30 days, 90 days, or "all"
+# How far back to scan sessions (cloud store + local JSONL):
+#   1 day, 7 days, 30 days, 90 days, 1 year, or "all"
 # Runtime flag: --window 30 days
 DREAM_WINDOW=7 days
+
+# Which local VS Code installs to scan for chat JSONL.
+# Cloud store is always queried; this only controls on-disk history.
+#   all       — every flavor dir that exists (Stable, Insiders, Exploration, VSCodium, Cursor)
+#   current   — only the app running this chat
+#   stable    — Code only
+#   insiders  — Code - Insiders only
+#   none      — skip local scan
+# Runtime flag: --flavors all
+DREAM_LOCAL_FLAVORS=all
 
 # Minimum hours between automatic dreams
 DREAM_INTERVAL_HOURS=24

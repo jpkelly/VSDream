@@ -18,6 +18,8 @@ test-fixtures/
 repos/
 
 # ─── OS / editor files ───
+__pycache__/
+*.pyc
 .DS_Store
 *.swp
 *~

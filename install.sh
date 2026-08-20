@@ -70,9 +70,10 @@ echo ""
 info "=== step: Installing VSDream to $SKILL_DIR ==="
 mkdir -p "$SKILL_DIR"
 
-cp "$SCRIPT_DIR/SKILL.md"           "$SKILL_DIR/SKILL.md"
-cp "$SCRIPT_DIR/should-dream.sh"   "$SKILL_DIR/should-dream.sh"
-chmod +x "$SKILL_DIR/should-dream.sh"
+cp "$SCRIPT_DIR/SKILL.md"                 "$SKILL_DIR/SKILL.md"
+cp "$SCRIPT_DIR/should-dream.sh"          "$SKILL_DIR/should-dream.sh"
+cp "$SCRIPT_DIR/scan-local-sessions.py"   "$SKILL_DIR/scan-local-sessions.py"
+chmod +x "$SKILL_DIR/should-dream.sh" "$SKILL_DIR/scan-local-sessions.py"
 
 # Copy config template — only if missing, unless --force (then overwrite)
 if [[ $FORCE -eq 1 ]] || [[ ! -f "$SKILL_DIR/.dream-config" ]]; then
@@ -85,6 +86,7 @@ if [[ $FORCE -eq 1 ]] || [[ ! -f "$SKILL_DIR/.dream-config" ]]; then
         cat > "$SKILL_DIR/.dream-config" << 'EOF'
 DREAM_MEMORY_SCOPE=user
 DREAM_WINDOW=7 days
+DREAM_LOCAL_FLAVORS=all
 DREAM_INTERVAL_HOURS=24
 DREAM_APPLY=false
 DREAM_MAX_LINES=200
